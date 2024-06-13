@@ -42,8 +42,6 @@ class StochasticNussinov:
         for s in range(4):
             for t in range(4):
                 ret += self.rna_seq_matrix[i][s] * self.rna_seq_matrix[j][t] * can_pair_idx(s, t)
-        print("hi")
-        print(ret)
         return ret / (self.rna_partial_sum[j] * self.rna_partial_sum[i])
 
     def nussinov(self):
@@ -64,7 +62,7 @@ class StochasticNussinov:
 
     # いずれ traceback の dp に noise が加わるので注意する。
     def traceback(self):
-        self.strcture = self.traceback_(0, self.n-1)
+        self.structure = self.traceback_(0, self.n-1)
 
     def nearly_equal(self, a, b, epsilon=1e-6):
         return abs(a - b) < epsilon
@@ -131,7 +129,7 @@ rna_seq = rnaseq.rna_seq
 stochastic_nussinov = StochasticNussinov(rna_seq_matrix)
 stochastic_nussinov.nussinov()
 stochastic_nussinov.traceback()
-structure = stochastic_nussinov.strcture
+structure = stochastic_nussinov.structure
 
 print("Pairs:", structure)
 ## dot bracket
