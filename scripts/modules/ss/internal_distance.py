@@ -1,6 +1,6 @@
 import numpy as np
 import math
-import heapq # for dijkstra
+import heapq  # for dijkstra
 import sys
 
 
@@ -8,8 +8,8 @@ class DijkstraSS:
     def __init__(self, alpha=0.5, distmat=None):
         self.alpha = alpha
         self.distmat = distmat
-    
-    def calculateDistmat(self, rna_ss_matrix): # excluding pseudoknot!
+
+    def calculateDistmat(self, rna_ss_matrix):  # excluding pseudoknot!
         # rna secondary structure について、各塩基間の距離を計算する
         n = len(rna_ss_matrix)
         distmat = np.zeros((n, n))
@@ -25,7 +25,7 @@ class DijkstraSS:
                 else:
                     distmat[i][j] = float('inf')
         self.distmat = distmat
-        
+
     def dijkstra_(self, start, end):
         # Dijkstra's algorithm
         n = len(self.distmat)
@@ -47,8 +47,6 @@ class DijkstraSS:
                 if dist[v] > dist[u] + self.distmat[u][v]:
                     dist[v] = dist[u] + self.distmat[u][v]
                     heapq.heappush(q, (dist[v], v))
-        print("dist in dijkstra end:")
-        print(dist)
         return dist[end]
 
     def dijkstra(self):
@@ -59,15 +57,14 @@ class DijkstraSS:
             for j in range(n):
                 min_dist_mat[i][j] = self.dijkstra_(i, j)
         return min_dist_mat
-    
 
 
 n = 10
 rna_ss_matrix = np.zeros((n, n))
-rna_ss_matrix[1,9] = 1
-rna_ss_matrix[9,1] = 1
-rna_ss_matrix[2,6] = 1
-rna_ss_matrix[6,2] = 1
+rna_ss_matrix[1, 9] = 1
+rna_ss_matrix[9, 1] = 1
+rna_ss_matrix[2, 6] = 1
+rna_ss_matrix[6, 2] = 1
 
 
 dijkstra_ss = DijkstraSS()
@@ -78,8 +75,3 @@ min_distmat = dijkstra_ss.dijkstra()
 
 print("min_distmat")
 print(min_distmat)
-
-
-
-
-                
