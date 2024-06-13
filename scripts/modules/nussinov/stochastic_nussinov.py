@@ -87,6 +87,12 @@ class StochasticNussinov:
                 # if self.dp[i][j] == self.dp[i][k] + self.dp[k+1][j]:
                 if self.nearly_equal(self.dp[i][j], self.dp[i][k] + self.dp[k+1][j]):
                     return self.traceback_(i, k,  structure) | self.traceback_(k+1, j, structure)
+    def tuplestructure2matrix(self, structure):
+        ss_matrix = [[0] * self.n for _ in range(self.n)]
+        for (i, j) in structure:
+            ss_matrix[i][j] = 1
+            ss_matrix[j][i] = 1
+        return ss_matrix
 
 
 class Rnaseq:
@@ -115,7 +121,7 @@ class Rnaseq:
 
 # Example usage
 rnaseq = Rnaseq("AACCCCUUAAAAGGGGCCCC")
-rnaseq.add_noise(0.1)
+rnaseq.add_noise(0.2)
 rna_seq_matrix = rnaseq.rna_seq_matrix
 rna_seq = rnaseq.rna_seq
 
@@ -136,3 +142,8 @@ for (i, j) in structure:
 
 print("RNA sequence:\n\t", rna_seq)
 print("Dot bracket:\n\t", ''.join(dot_bracket))
+
+
+structure_matrix = stochastic_nussinov.tuplestructure2matrix(structure)
+for i in range(len(rna_seq)):
+    print(structure_matrix[i])
