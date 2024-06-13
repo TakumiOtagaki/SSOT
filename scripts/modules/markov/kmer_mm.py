@@ -16,6 +16,8 @@ class KmerMarkovModel:
         self.num_states = len(self.states)
         self.pi = pi
         self.transition_scores = transition_scores
+
+        self.base_mapping = {'A': 0, 'U': 1, 'G': 2, 'C': 3}
         
     def generate_states(self):
         """ Generate all possible k-mer states """
@@ -57,12 +59,24 @@ class KmerMarkovModel:
         # Find the optimal path
         end_state = np.argmax(dp[:, -1])
         optimal_sequence = [self.states[end_state]]
-        for j in range(n - self.k, 0, -1):
-            end_state = backtrack[end_state, j]
-            print("end_state:", self.states[end_state])
-            optimal_sequence.append(self.states[end_state][0])
+        optimal_seq_matrix = np.zeros((n, 4), dtype=float)
 
-        return ''.join(reversed(optimal_sequence)), dp[end_state, -1]
+
+
+        for j in range(n - self.k, -1, -1):
+            end_state = backtrack[end_state, j]
+            # print("end_state:", self.states[end_state])
+            optimal_sequence.append(self.states[end_state][0])
+            for b in range(4):
+                # j-1 まではそのままで、j 番目に b が来た時のそこまでの score を書く
+                optimal_seq_matrix[j, b] = dp[end_state, j] + self.transition_scores[end_state, b]
+                # print("optimal_seq_matrix[j, b]:", optimal_seq_matrix[j, b])
+            optimal_seq_matrix[j] = optimal_seq_matrix[j] / np.sum(optimal_seq_matrix[j])
+
+        # 最後の k-1 列は、後ろから k 番目のものを写す
+        for j in range(n - self.k, n):
+            optimal_seq_matrix[j] = optimal_seq_matrix[n - self.k]
+        return ''.join(reversed(optimal_sequence)), dp[end_state, -1], optimal_seq_matrix
         
 
 # Example usage
@@ -77,6 +91,7 @@ print("Transition scores:", transition_scores)
 
 model = KmerMarkovModel(k, pi, transition_scores)
 sequence_length = 50
-generated_sequence, score = model.MAP_sequence(sequence_length)
+generated_sequence, score, optimal_seq_matrix = model.MAP_sequence(sequence_length)
 print("Generated sequence:", generated_sequence)
 print("Optimal score:", score)
+print("Optimal sequence matrix:", optimal_seq_matrix)
