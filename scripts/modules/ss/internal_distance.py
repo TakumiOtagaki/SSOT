@@ -51,6 +51,9 @@ class DijkstraSS:
 
     def dijkstra(self):
         # Dijkstra's algorithm
+        if self.distmat is None:
+            print("distmat is None")
+            sys.exit()
         n = len(self.distmat)
         min_dist_mat = np.zeros((n, n))
         for i in range(n):
