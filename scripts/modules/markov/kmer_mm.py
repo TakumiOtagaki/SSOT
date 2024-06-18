@@ -79,20 +79,21 @@ class KmerMarkovModel:
         return ''.join(reversed(optimal_sequence)), dp[end_state, -1], optimal_seq_matrix
 
 
-# Example usage
-k = 3  # Length of the k-mer
-# seed
-np.random.seed(6)
-pi = np.random.rand(4 ** k)  # Random initial probabilities
-transition_scores = np.random.rand(4 ** k, 4)  # Random transition scores
-print("Initial probabilities:", pi)
-print("Transition scores:", transition_scores)
-# sys.exit()
+if __name__ == "__main__":
+    # Example usage
+    k = 3  # Length of the k-mer
+    # seed
+    np.random.seed(6)
+    pi = np.random.rand(4 ** k)  # Random initial probabilities
+    transition_scores = np.random.rand(4 ** k, 4)  # Random transition scores
+    print("Initial probabilities:", pi)
+    print("Transition scores:", transition_scores)
+    # sys.exit()
 
-model = KmerMarkovModel(k, pi, transition_scores)
-sequence_length = 50
-generated_sequence, score, optimal_seq_matrix = model.MAP_sequence(
-    sequence_length)
-print("Generated sequence:", generated_sequence)
-print("Optimal score:", score)
-print("Optimal sequence matrix:", optimal_seq_matrix)
+    model = KmerMarkovModel(k, pi, transition_scores)
+    sequence_length = 50
+    generated_sequence, score, optimal_seq_matrix = model.MAP_sequence(
+        sequence_length)
+    print("Generated sequence:", generated_sequence)
+    print("Optimal score:", score)
+    print("Optimal sequence matrix:", optimal_seq_matrix)
