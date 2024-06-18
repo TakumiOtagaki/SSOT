@@ -1,16 +1,17 @@
 from math import fabs
+
+
 def can_pair(i, j, rna_seq):
     pair = set((rna_seq[i], rna_seq[j]))
     valid_pairs = [set('AU'), set('GU'), set('GC')]
     return any(pair == vp for vp in valid_pairs) * (fabs(i-j) > 3)
 
+
 def nussinov(rna_seq):
     n = len(rna_seq)
     # Initialize the DP table
     dp = [[0]*n for _ in range(n)]
-    
 
-    
     # Fill the DP table
     for length in range(4, n+1):  # Minimum loop length condition
         for i in range(n-length+1):
@@ -20,8 +21,9 @@ def nussinov(rna_seq):
             dp[i][j] = max(dp[i][j], dp[i+1][j], dp[i][j-1])
             for k in range(i+1, j):
                 dp[i][j] = max(dp[i][j], dp[i][k] + dp[k+1][j])
-    
+
     return dp, rna_seq
+
 
 def traceback(dp, rna_seq, i, j, structure=set()):
     if i >= j:
@@ -38,12 +40,13 @@ def traceback(dp, rna_seq, i, j, structure=set()):
             if dp[i][j] == dp[i][k] + dp[k+1][j]:
                 return traceback(dp, rna_seq, i, k, structure) | traceback(dp, rna_seq, k+1, j, structure)
 
+
 # Example usage
-rna_sequence = "GCGAUCACGU"
+rna_sequence = "AAUCUUAUCAAUUAAUUUGAAUACAGAAGA"
 dp_table, sequence = nussinov(rna_sequence)
 structure = traceback(dp_table, sequence, 0, len(sequence)-1)
 print("Pairs:", structure)
-## dot bracket
+# dot bracket
 dot_bracket = ['.' for _ in range(len(sequence))]
 for (i, j) in structure:
     dot_bracket[i] = '('
@@ -51,3 +54,4 @@ for (i, j) in structure:
 
 print("RNA sequence:\n\t", sequence)
 print("Dot bracket:\n\t", ''.join(dot_bracket))
+print("num bp:", len(structure))
