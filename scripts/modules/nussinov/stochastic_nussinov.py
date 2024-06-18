@@ -16,6 +16,7 @@
 #     return any(pair == vp for vp in valid_pairs) * (fabs(i-j) > 3)
 
 import sys
+import torch
 
 
 def validate_input(rna_seq_matrix):
@@ -33,6 +34,7 @@ class StochasticNussinov:
                    for _ in range(len(rna_seq_matrix))]
         self.strcture = set()
         self.n = len(rna_seq_matrix)
+        self.dp = None
         self.num_type = len(rna_seq_matrix[0])
 
     def expec_pair(self, i, j):
