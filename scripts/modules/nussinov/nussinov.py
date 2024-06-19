@@ -22,7 +22,7 @@ def nussinov(rna_seq):
             for k in range(i+1, j):
                 dp[i][j] = max(dp[i][j], dp[i][k] + dp[k+1][j])
 
-    return dp, rna_seq
+    return dp
 
 
 def traceback(dp, rna_seq, i, j, structure=set()):
@@ -41,17 +41,18 @@ def traceback(dp, rna_seq, i, j, structure=set()):
                 return traceback(dp, rna_seq, i, k, structure) | traceback(dp, rna_seq, k+1, j, structure)
 
 
-# Example usage
-rna_sequence = "AAUCUUAUCAAUUAAUUUGAAUACAGAAGA"
-dp_table, sequence = nussinov(rna_sequence)
-structure = traceback(dp_table, sequence, 0, len(sequence)-1)
-print("Pairs:", structure)
-# dot bracket
-dot_bracket = ['.' for _ in range(len(sequence))]
-for (i, j) in structure:
-    dot_bracket[i] = '('
-    dot_bracket[j] = ')'
+if __name__ == "__main__":
+    # Example usage
+    rna_sequence = "AAUCUUAUCAAUUAAUUUGAAUACAGAAGA"
+    dp = nussinov(rna_sequence)
+    tuple_structure = traceback(dp, rna_sequence, 0, len(rna_sequence)-1)
+    print("Pairs:", tuple_structure)
+    # dot bracket
+    dot_bracket = ['.' for _ in range(len(rna_sequence))]
+    for (i, j) in tuple_structure:
+        dot_bracket[i] = '('
+        dot_bracket[j] = ')'
 
-print("RNA sequence:\n\t", sequence)
-print("Dot bracket:\n\t", ''.join(dot_bracket))
-print("num bp:", len(structure))
+    print("RNA sequence:\n\t", rna_sequence)
+    print("Dot bracket:\n\t", ''.join(dot_bracket))
+    print("num bp:", len(tuple_structure))
