@@ -1,20 +1,75 @@
 import torch
 import sys
+import numpy as np
 # X は n times 4 matrix (torch)
 
 
-def onehot_basepair(x_i, x_j, T=3.0):
+def onehot_basepair(x_i, x_j, T, gaussian_sigma):
     # xi, xj はどちらも 0/1 の四次元ベクトル。A, U, G, C の順番に並んでいる。
     # if (xi, xj) is (A, U), (U, A), (G, C), (C, G), (U, G), (G, U): return 1
     # これを 内積で表現する（微分可能にするために）
-    A_U = x_i[0] * x_j[1] + x_i[1] * x_j[0]  # 1
-    # print("A_U:", A_U)
-    G_C = x_i[2] * x_j[3] + x_i[3] * x_j[2]  # 2
-    # print("G_C:", G_C)
-    U_G = x_i[1] * x_j[2] + x_i[2] * x_j[1]  # 3
-    # print("U_G:", U_G)
+    # 分散が sigma のガウス分布で平均が 1 の値を返す
+    def gaussian(x, sigma):
+        return torch.exp(- (x - 1) ** 2 / (sigma ** 2))
+    s_i = gaussian(x_i, gaussian_sigma)
+    s_j = gaussian(x_j, gaussian_sigma)
+    A_U = s_i[0] * s_j[1] + s_i[1] * s_j[0]  # 1
+    G_C = s_i[2] * s_j[3] + s_i[3] * s_j[2]  # 2
+    U_G = s_i[1] * s_j[2] + s_i[2] * s_j[1]  # 3
 
-    return ((A_U + G_C + U_G) / (x_i.sum() * x_j.sum())) * T
+    # A_U = x_i[0] * x_j[1] + x_i[1] * x_j[0]  # 1
+    # # print("A_U:", A_U)
+    # G_C = x_i[2] * x_j[3] + x_i[3] * x_j[2]  # 2
+    # # print("G_C:", G_C)
+    # U_G = x_i[1] * x_j[2] + x_i[2] * x_j[1]  # 3
+    # print("U_G:", U_G)
+    return (A_U + G_C + U_G) * T
+
+
+def onehot_basepair_grad(x_i, x_j, T, gaussian_sigma):
+    """
+    derivative of onehot_basepair by x_i.
+    """
+    def gaussian(x, sigma):
+        return torch.exp(- (x - 1) ** 2 / (sigma ** 2))
+
+    def derivative_gaussian(x, sigma):
+        return - 2 * (x - 1) / (sigma ** 2) * gaussian(x, sigma)
+    grad = torch.zeros(4)
+    s_j = gaussian(x_j, gaussian_sigma)
+
+    grad[0] = derivative_gaussian(x_i[0], gaussian_sigma) * s_j[1]
+    grad[1] = derivative_gaussian(x_i[1], gaussian_sigma) * (s_j[0] + s_j[2])
+    grad[2] = derivative_gaussian(x_i[2], gaussian_sigma) * (s_j[3] + s_j[1])
+    grad[3] = derivative_gaussian(x_i[3], gaussian_sigma) * s_j[2]
+
+    return grad
+
+
+def onehot_Relu_basepair(x_i, x_j, T, threshold):
+    # 勾配消失に対応
+    A_U = torch.relu(x_i[0] * x_j[1] + x_i[1] * x_j[0] - threshold)  # 1
+    G_C = torch.relu(x_i[2] * x_j[3] + x_i[3] * x_j[2] - threshold)  # 2
+    U_G = torch.relu(x_i[1] * x_j[2] + x_i[2] * x_j[1] - threshold)  # 3
+    return (A_U + G_C + U_G) * T
+
+
+def onehot_Relu_basepair_grad(x_i, x_j, T, threshold):
+    # 勾配消失に対応
+    grad = torch.zeros(4)
+    grad[0] += 1 if x_i[0] * x_j[1] + x_i[1] * \
+        x_j[0] - threshold > 0 else 0  # AU
+    grad[1] += 1 if x_i[0] * x_j[1] + x_i[1] * \
+        x_j[0] - threshold > 0 else 0  # UA
+    grad[2] += 1 if x_i[2] * x_j[3] + x_i[3] * \
+        x_j[2] - threshold > 0 else 0  # GC
+    grad[3] += 1 if x_i[2] * x_j[3] + x_i[3] * \
+        x_j[2] - threshold > 0 else 0  # CG
+    grad[1] += 1 if x_i[1] * x_j[2] + x_i[2] * \
+        x_j[1] - threshold > 0 else 0  # UG
+    grad[2] += 1 if x_i[1] * x_j[2] + x_i[2] * \
+        x_j[1] - threshold > 0 else 0  # GU
+    return grad * T
 
 
 def res2onehot(res):
@@ -30,7 +85,7 @@ def res2onehot(res):
         raise ValueError("Invalid input")
 
 
-def logsumexp_nussinov(X, T=3.0):
+def logsumexp_nussinov(X, T, gaussian_sigma, RELU_THRESHOLD):
     # Fill the DP table
     n = X.size(0)
     dp = torch.full((n, n), 0.0, requires_grad=True)
@@ -51,8 +106,11 @@ def logsumexp_nussinov(X, T=3.0):
                 torch.stack([
                     dp[i+1][j],
                     dp[i][j-1],
-                    dp[i+1][j-1] +
-                    onehot_basepair(X[i], X[j], T)  # 3
+                    # dp[i+1][j-1] +
+                    # onehot_basepair(
+                    #     X[i], X[j], T, gaussian_sigma) * (j - i >= 3)
+                    dp[i+1][j-1] + onehot_Relu_basepair(
+                        X[i], X[j], T, RELU_THRESHOLD) * (j - i >= 3)
                 ]
                     + [dp[i][k] + dp[k+1][j] for k in range(i+1, j)]), dim=0
             )
@@ -64,7 +122,7 @@ def logsumexp_nussinov(X, T=3.0):
     return dp
 
 
-def calc_intermediate_params(dp, X, T=3.0):
+def calc_intermediate_params(dp, X, T, gaussian_sigma):
     n = dp.size(0)
     theta = torch.zeros(n, n, 3)  # i, j to i', j'
     phi = torch.zeros(n, n, n)  # i, j to i, k and k+1, j
@@ -75,7 +133,7 @@ def calc_intermediate_params(dp, X, T=3.0):
         theta[i, j, 0] = dp[i+1][j]
         theta[i, j, 1] = dp[i][j-1]
         theta[i, j, 2] = dp[i+1][j-1] + \
-            onehot_basepair(X[i], X[j], T)
+            onehot_basepair(X[i], X[j], T, gaussian_sigma)
         for k in range(i+1, j):
             phi[i, j, k] = dp[i][k] + dp[k+1][j]
     return theta, phi
@@ -147,40 +205,107 @@ def differential_traceback(dp, X, T):
     return structure, z1, z2
 
 
-def simple_traceback(dp, X, T):
+def simple_traceback(dp, X, T, gaussian_sigma):
     n = X.size(0)
     structure = set()  # tuple of (i, j)
 
     def traceback_(i, j):
-        try:
-            nonlocal structure
-            if i >= j:
-                return
-            choices = torch.stack([
-                dp[i+1][j],
-                dp[i][j-1],
-                dp[i+1][j-1] + onehot_basepair(X[i], X[j], T),
-            ] + [dp[i][k] + dp[k+1][j] for k in range(i+1, j)]).unsqueeze(0)
-            max_index = torch.argmax(choices).item()
-            if max_index == 2:
-                structure.add((i, j))
-                traceback_(i+1, j-1)
-            elif max_index == 0:
-                traceback_(i+1, j)
-            elif max_index == 1:
-                traceback_(i, j-1)
-            else:
-                k = max_index - 3 + i
-                traceback_(i, k)
-                traceback_(k+1, j)
-        except Exception as e:
-            print("i, j:", i, j)
-            print("ERROR!, ", e)
-            sys.exit()
-            raise e
+        nonlocal structure
+        if i >= j:
+            return
+        choices = torch.stack([
+            dp[i+1][j],
+            dp[i][j-1],
+            (dp[i+1][j-1] +
+                onehot_basepair(X[i], X[j], T, gaussian_sigma)) * (j - i >= 3),
+        ] + [dp[i][k] + dp[k+1][j] for k in range(i+1, j)]).unsqueeze(0)
+        # print("choices:", choices)
+        max_index = torch.argmax(choices).item()
+        if max_index == 2:
+            print("bp: i, j:", i, j)
+            structure.add((i, j))
+            traceback_(i+1, j-1)
+        elif max_index == 0:
+            traceback_(i+1, j)
+        elif max_index == 1:
+            traceback_(i, j-1)
+        elif max_index == 3 + (j - (i+1)):  # end
+            print("全て 1e-20 以下でおかしい")
+        else:
+            k = max_index - 3 + i
+            traceback_(i, k)
+            traceback_(k+1, j)
 
     traceback_(0, n-1)
     return structure
+
+
+def traceback_MAP(theta, phi, n):
+    # theta: n, n, 3
+    # phi: n, n, n
+    z1 = torch.zeros(n, n, 3)
+    z2 = torch.zeros(n, n, n)
+
+    structure = set()  # tuple of (i, j)
+
+    def traceback_(i, j):
+        nonlocal z1
+        nonlocal z2
+        nonlocal structure
+        if i >= j:
+            return
+        choices = torch.stack([theta[i, j, k] for k in range(3)] +
+                              [phi[i, j, k] for k in range(i+1, j)])
+        if j - i < 3:
+            choices[2] = -np.inf
+        max_index = torch.argmax(choices).item()
+        if max_index == 0:
+            z1[i, j, 0] += 1
+            traceback_(i+1, j)
+        elif max_index == 1:
+            z1[i, j, 1] += 1
+            traceback_(i, j-1)
+        elif max_index == 2:
+            z1[i, j, 2] += 1
+            structure.add((i, j))
+            traceback_(i+1, j-1)
+        else:
+            k = max_index - 3 + i + 1
+            z2[i, j, k] += 1
+            traceback_(i, k)
+            traceback_(k+1, j)
+
+    traceback_(0, n-1)
+    return structure, z1, z2
+
+
+def grad_dp_X(dp, X, ReluThreshold, T, dim):
+    n = X.size(0)
+    A = torch.zeros((n, dim, n, n))
+    E = torch.exp(dp)  # E は dp の exp
+
+    for length in range(4, n + 1):
+        for i in range(n - length + 1):
+            j = i + length - 1
+
+            G_ij = torch.stack([E[i+1][j], E[i][j-1], torch.exp(dp[i+1][j-1] +
+                                                                onehot_Relu_basepair(X[i], X[j], T, ReluThreshold) * (j - i >= 3))])
+            G_ij = torch.cat(
+                (G_ij, torch.stack([torch.exp(dp[i][k] + dp[k+1][j]) for k in range(i+1, j)])))
+
+            for t in range(n):
+                for d in range(dim):
+                    numerator = torch.exp(dp[i+1][j-1] + onehot_Relu_basepair(X[i], X[j], T, ReluThreshold) * (j - i >= 3)) * (
+                        A[t, d, i+1, j-1] + onehot_Relu_basepair_grad(X[i], X[j], T, ReluThreshold)[d])
+                    numerator += E[i][j-1] * A[t, d, i, j-1]
+                    numerator += E[i+1][j] * A[t, d, i+1, j]
+                    for k in range(i+1, j):
+                        numerator += torch.exp(dp[i][k] + dp[k+1][j]) * \
+                            (A[t, d, i, k] + A[t, d, k+1, j])
+
+            A[:, :, i, j] = numerator / G_ij.sum()
+
+    return A
 
 
 if __name__ == "__main__":
