@@ -90,12 +90,18 @@ def dijkstra_route(W, s, g):
     # backtracking
     R = torch.zeros((n, n))
     u = g
+    visited = [False for _ in range(n)]
     while u != s:
+        visited[u] = True
         for v in range(n):
-            if dist[u] == dist[v] + W[v][u]:
+            # if dist[u] == dist[v] + W[v][u]:
+            if math.isclose(dist[u], dist[v] + W[v][u], rel_tol=1e-10) and not visited[v]:
                 R[v][u] = R[v][u] + 1
                 u = v
                 break
+        else:
+            print("error")
+            sys.exit()
     return R
 
 
