@@ -1,6 +1,7 @@
 import torch
 import sys
 import numpy as np
+from functools import partial
 # X は n times 4 matrix (torch)
 
 
@@ -57,18 +58,12 @@ def onehot_Relu_basepair(x_i, x_j, T, threshold):
 def onehot_Relu_basepair_grad(x_i, x_j, T, threshold):
     # 勾配消失に対応
     grad = torch.zeros(4)
-    grad[0] += 1 if x_i[0] * x_j[1] + x_i[1] * \
-        x_j[0] - threshold > 0 else 0  # AU
-    grad[1] += 1 if x_i[0] * x_j[1] + x_i[1] * \
-        x_j[0] - threshold > 0 else 0  # UA
-    grad[2] += 1 if x_i[2] * x_j[3] + x_i[3] * \
-        x_j[2] - threshold > 0 else 0  # GC
-    grad[3] += 1 if x_i[2] * x_j[3] + x_i[3] * \
-        x_j[2] - threshold > 0 else 0  # CG
-    grad[1] += 1 if x_i[1] * x_j[2] + x_i[2] * \
-        x_j[1] - threshold > 0 else 0  # UG
-    grad[2] += 1 if x_i[1] * x_j[2] + x_i[2] * \
-        x_j[1] - threshold > 0 else 0  # GU
+    grad[0] += x_j[1] * (x_i[0] * x_j[1] + x_i[1] * x_j[0] > threshold)  # AU
+    grad[1] += x_j[0] * (x_i[0] * x_j[1] + x_i[1] * x_j[0] > threshold)  # UA
+    grad[2] += x_j[3] * (x_i[2] * x_j[3] + x_i[3] * x_j[2] > threshold)  # GC
+    grad[3] += x_j[2] * (x_i[2] * x_j[3] + x_i[3] * x_j[2] > threshold)  # CG
+    grad[1] += x_j[2] * (x_i[1] * x_j[2] + x_i[2] * x_j[1] > threshold)  # UG
+    grad[2] += x_j[1] * (x_i[1] * x_j[2] + x_i[2] * x_j[1] > threshold)  # GU
     return grad * T
 
 
@@ -280,30 +275,54 @@ def traceback_MAP(theta, phi, n):
 
 
 def grad_dp_X(dp, X, ReluThreshold, T, dim):
+    # partial
+    bp = partial(onehot_Relu_basepair, T=T, threshold=ReluThreshold)
+    bp_grad = partial(onehot_Relu_basepair_grad, T=T, threshold=ReluThreshold)
     n = X.size(0)
-    A = torch.zeros((n, dim, n, n))
+
+    A = torch.zeros(n, dim, n, n)
     E = torch.exp(dp)  # E は dp の exp
 
     for length in range(4, n + 1):
         for i in range(n - length + 1):
-            j = i + length - 1
+            # i,j = (0, 3), (0, 4), (0, 5), (0, 6), (1, 4), (1, 5), (1, 6), (2, 5), (2, 6), (3, 6)
+            j = i + length - 1  # (i, j) = (i, i+length-1), ..., (i, n-1)
 
-            G_ij = torch.stack([E[i+1][j], E[i][j-1], torch.exp(dp[i+1][j-1] +
-                                                                onehot_Relu_basepair(X[i], X[j], T, ReluThreshold) * (j - i >= 3))])
+            G_ij = torch.stack(
+                [E[i+1][j], E[i][j-1], torch.exp(dp[i+1][j-1] + bp(X[i], X[j]))])
             G_ij = torch.cat(
                 (G_ij, torch.stack([torch.exp(dp[i][k] + dp[k+1][j]) for k in range(i+1, j)])))
+            G_ij_sum = G_ij.sum()
 
-            for t in range(n):
-                for d in range(dim):
-                    numerator = torch.exp(dp[i+1][j-1] + onehot_Relu_basepair(X[i], X[j], T, ReluThreshold) * (j - i >= 3)) * (
-                        A[t, d, i+1, j-1] + onehot_Relu_basepair_grad(X[i], X[j], T, ReluThreshold)[d])
-                    numerator += E[i][j-1] * A[t, d, i, j-1]
-                    numerator += E[i+1][j] * A[t, d, i+1, j]
+            for d in range(dim):
+                for t in range(n):
+                    numerator = torch.tensor(0.0)
+                    # dp[i+1][j-1] + bp(X[i], X[j]) の微分
+                    if i <= t <= j:
+                        if t == i:
+                            numerator += G_ij[2] * bp_grad(X[i], X[j])[d]
+                        elif t == j:
+                            numerator += G_ij[2] * bp_grad(X[j], X[i])[d]
+                        else:
+                            numerator += G_ij[2] * A[t, d, i+1, j-1]
+                    else:
+                        "微分は 0 になる"
+                    # dp[i+1][j] の微分
+                    if i+1 <= t <= j:
+                        numerator += G_ij[0] * A[t, d, i+1, j]
+                    # dp[i][j-1] の微分
+                    if i <= t <= j-1:
+                        numerator += G_ij[1] * A[t, d, i, j-1]
+                    # dp[i][k] + dp[k+1][j] の微分
+                    tmp_k = 0
                     for k in range(i+1, j):
-                        numerator += torch.exp(dp[i][k] + dp[k+1][j]) * \
-                            (A[t, d, i, k] + A[t, d, k+1, j])
+                        if i <= t <= k:
+                            tmp_k += A[t, d, i, k]
+                        if k+1 <= t <= j:
+                            tmp_k += A[t, d, k+1, j]
+                        numerator += torch.exp(dp[i][k] + dp[k+1][j]) * tmp_k
 
-            A[:, :, i, j] = numerator / G_ij.sum()
+                    A[t, d, i, j] += numerator / G_ij_sum
 
     return A
 
