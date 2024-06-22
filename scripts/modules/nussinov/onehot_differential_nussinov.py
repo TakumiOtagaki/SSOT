@@ -44,7 +44,7 @@ def onehot_basepair_grad(x_i, x_j, T, gaussian_sigma):
     grad[2] = derivative_gaussian(x_i[2], gaussian_sigma) * (s_j[3] + s_j[1])
     grad[3] = derivative_gaussian(x_i[3], gaussian_sigma) * s_j[2]
 
-    return grad
+    return grad * T
 
 
 def onehot_Relu_basepair(x_i, x_j, T, threshold):
@@ -274,10 +274,12 @@ def traceback_MAP(theta, phi, n):
     return structure, z1, z2
 
 
-def grad_dp_X(dp, X, ReluThreshold, T, dim):
+def grad_dp_X(dp, X, ReluThreshold, T, dim, gaussian_sigma):
     # partial
-    bp = partial(onehot_Relu_basepair, T=T, threshold=ReluThreshold)
-    bp_grad = partial(onehot_Relu_basepair_grad, T=T, threshold=ReluThreshold)
+    # bp = partial(onehot_Relu_basepair, T=T, threshold=ReluThreshold)
+    # bp_grad = partial(onehot_Relu_basepair_grad, T=T, threshold=ReluThreshold)
+    bp = partial(onehot_basepair, T=T, gaussian_sigma=gaussian_sigma)
+    bp_grad = partial(onehot_basepair_grad, T=T, gaussian_sigma=gaussian_sigma)
     n = X.size(0)
 
     A = torch.zeros(n, dim, n, n)
