@@ -18,31 +18,61 @@ def onehot_basepair(x_i, x_j, T, gaussian_sigma):
     G_C = s_i[2] * s_j[3] + s_i[3] * s_j[2]  # 2
     U_G = s_i[1] * s_j[2] + s_i[2] * s_j[1]  # 3
 
-    # A_U = x_i[0] * x_j[1] + x_i[1] * x_j[0]  # 1
-    # # print("A_U:", A_U)
-    # G_C = x_i[2] * x_j[3] + x_i[3] * x_j[2]  # 2
-    # # print("G_C:", G_C)
-    # U_G = x_i[1] * x_j[2] + x_i[2] * x_j[1]  # 3
-    # print("U_G:", U_G)
-    return (A_U + G_C + U_G) * T
+    # pairs which do not form basepair
+    A_G = s_i[0] * s_j[2] + s_i[2] * s_j[0]  # 4
+    A_C = s_i[0] * s_j[3] + s_i[3] * s_j[0]  # 5
+    U_C = s_i[1] * s_j[3] + s_i[3] * s_j[1]  # 6
+    # return T * (A_U + G_C + U_G)
+    return T * (A_U + G_C + U_G) * (1 - A_G) * (1 - A_C) * (1 - U_C)
 
 
 def onehot_basepair_grad(x_i, x_j, T, gaussian_sigma):
     """
     derivative of onehot_basepair by x_i.
     """
-    def gaussian(x, sigma):
-        return torch.exp(- (x - 1) ** 2 / (sigma ** 2))
+    def g(x):
+        return torch.exp(- (x - 1) ** 2 / (gaussian_sigma ** 2))
+        # return torch.exp(- (x - 0.8) ** 2 / (gaussian_sigma ** 2))
 
-    def derivative_gaussian(x, sigma):
-        return - 2 * (x - 1) / (sigma ** 2) * gaussian(x, sigma)
+    def dg(x):
+        return - 2 * (x - 1) / (gaussian_sigma ** 2) * g(x)
+        # return - 2 * (x - 0.8) / (sigma ** 2) * gaussian(x, sigma)
     grad = torch.zeros(4)
-    s_j = gaussian(x_j, gaussian_sigma)
+    s_j = g(x_j)
+    s_i = g(x_i)
+    A_U = s_i[0] * s_j[1] + s_i[1] * s_j[0]  # 1
+    G_C = s_i[2] * s_j[3] + s_i[3] * s_j[2]  # 2
+    U_G = s_i[1] * s_j[2] + s_i[2] * s_j[1]  # 3
 
-    grad[0] = derivative_gaussian(x_i[0], gaussian_sigma) * s_j[1]
-    grad[1] = derivative_gaussian(x_i[1], gaussian_sigma) * (s_j[0] + s_j[2])
-    grad[2] = derivative_gaussian(x_i[2], gaussian_sigma) * (s_j[3] + s_j[1])
-    grad[3] = derivative_gaussian(x_i[3], gaussian_sigma) * s_j[2]
+    # pairs which do not form basepair
+    A_G = s_i[0] * s_j[2] + s_i[2] * s_j[0]  # 4
+    A_C = s_i[0] * s_j[3] + s_i[3] * s_j[0]  # 5
+    U_C = s_i[1] * s_j[3] + s_i[3] * s_j[1]  # 6
+
+    # grad[0] = dg(x_i[0], gaussian_sigma) * s_j[1]
+    # grad[1] = dg(x_i[1], gaussian_sigma) * (s_j[0] + s_j[2])
+    # grad[2] = dg(x_i[2], gaussian_sigma) * (s_j[3] + s_j[1])
+    # grad[3] = dg(x_i[3], gaussian_sigma) * s_j[2]
+    # return grad * T
+
+    grad[0] = (1 - U_C) * (  # A で微分
+        dg(x_i[0]) * s_j[1] * (1 - A_G) * (1 - A_C)
+        - (A_U + U_G + G_C) * (dg(x_i[0]) * s_j[2] *
+                               (1 - A_C) + dg(x_i[0]) * s_j[3] * (1 - A_G))
+    )
+    grad[1] = (1 - A_C) * (1 - A_G) * (  # U で微分
+        (dg(x_i[1]) * (s_j[0] + s_j[2])) * (1 - U_C)
+        - (A_U + U_G + G_C) * (dg(x_i[1] * s_j[3]))
+    )
+    grad[2] = (1 - A_C) * (1 - U_C) * (  # G で微分
+        dg(x_i[2]) * (s_j[3] + s_j[1]) * (1 - A_G)
+        - (A_U + U_G + G_C) * (dg(x_i[2]) * (s_j[0]))
+    )
+    grad[3] = (1 - A_G) * (  # C で微分
+        dg(x_i[3]) * s_j[2] * (1 - A_C) * (1 - U_C)
+        - (A_U + U_G + G_C) * (dg(x_i[3]) * \
+                               (s_j[0] * (1 - U_C) + s_j[1] * (1 - A_C)))
+    )
 
     return grad * T
 

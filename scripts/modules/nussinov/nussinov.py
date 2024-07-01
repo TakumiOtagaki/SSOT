@@ -4,20 +4,20 @@ from math import fabs
 def can_pair(i, j, rna_seq):
     pair = set((rna_seq[i], rna_seq[j]))
     valid_pairs = [set('AU'), set('GU'), set('GC')]
-    return any(pair == vp for vp in valid_pairs) * (fabs(i-j) > 3)
+    return any(pair == vp for vp in valid_pairs) * (fabs(i-j) >= 3)
 
 
 def nussinov(rna_seq):
     n = len(rna_seq)
     # Initialize the DP table
-    dp = [[0]*n for _ in range(n)]
+    dp = [[0] * n for _ in range(n)]
 
     # Fill the DP table
     for length in range(4, n+1):  # Minimum loop length condition
         for i in range(n-length+1):
             j = i + length - 1
-            if can_pair(i, j, rna_seq):
-                dp[i][j] = max(dp[i][j], dp[i+1][j-1] + 1)
+            dp[i][j] = max(dp[i][j], dp[i+1][j-1] + (j - i >= 3)
+                           * can_pair(i, j, rna_seq))
             dp[i][j] = max(dp[i][j], dp[i+1][j], dp[i][j-1])
             for k in range(i+1, j):
                 dp[i][j] = max(dp[i][j], dp[i][k] + dp[k+1][j])
@@ -32,7 +32,7 @@ def traceback(dp, rna_seq, i, j, structure=set()):
         return traceback(dp, rna_seq, i+1, j, structure)
     elif dp[i][j] == dp[i][j-1]:
         return traceback(dp, rna_seq, i, j-1, structure)
-    elif dp[i][j] == dp[i+1][j-1] + 1 and can_pair(i, j, rna_seq):
+    elif dp[i][j] == dp[i+1][j-1] + can_pair(i, j, rna_seq) * (j - i >= 3):
         structure.add((i, j))
         return traceback(dp, rna_seq, i+1, j-1, structure)
     else:
