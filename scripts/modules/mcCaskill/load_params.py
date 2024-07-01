@@ -1,5 +1,7 @@
 import re
 import sys
+import numpy as np
+
 param_file = "/large/otgk/SSOT/scripts/modules/mcCaskill/ViennaRNA/misc/rna_turner2004.par"
 
 
@@ -10,10 +12,14 @@ class RNAParams:
         self.hairpin = dict()
         self.internal = dict()
         self.ml_params = dict()
+        self.stack_bases = ['CG', 'GC', 'GU', 'UG', 'AU', 'UA', 'NN']
+        self.limit_length = 30
+        self.KT = 0.61632 # kcal/mol
 
 def parse_rna_params(file_path):
     params = RNAParams()
     current_section = None
+    stack_bases = ['CG', 'GC', 'GU', 'UG', 'AU', 'UA', 'NN']
 
     section_patterns = {
         'stack': re.compile(r'#\s*stack$'),
@@ -91,6 +97,38 @@ def parse_rna_params(file_path):
 
     return params
 
+def inf2large(prm, large=1e6):
+    for key in prm.bulge:
+        if prm.bulge[key] == np.float64("inf"):
+            prm.bulge[key] = large
+    for key in prm.hairpin:
+        if prm.hairpin[key] == np.float64("inf"):
+            prm.hairpin[key] = large
+    for key in prm.internal:
+        if prm.internal[key] == np.float64("inf"):
+            prm.internal[key] = large
+    for key in prm.stack:
+        for key2 in prm.stack[key]:
+            if prm.stack[key][key2] == np.float64("inf"):
+                prm.stack[key][key2] = large
+    return prm
+
+def scale_params(prm):
+    # 1 の order にする
+    scaler = 1e-2
+    for key in prm.bulge:
+        prm.bulge[key] = prm.bulge[key] * scaler
+    for key in prm.hairpin:
+        prm.hairpin[key] = prm.hairpin[key] * scaler
+    for key in prm.internal:
+        prm.internal[key] = prm.internal[key] * scaler
+    for key in prm.stack:
+        for key2 in prm.stack[key]:
+            prm.stack[key][key2] = prm.stack[key][key2] * scaler
+    prm.ml_params["a"] = prm.ml_params["a"] * scaler
+    prm.ml_params["b"] = prm.ml_params["b"] * scaler
+    prm.ml_params["c"] = prm.ml_params["c"] * scaler
+    return prm
 
 if __name__ == "__main__":
     # 使用例
