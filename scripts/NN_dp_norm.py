@@ -22,6 +22,25 @@ dijkstra のルートの話と似ている。
 DEBUG = False
 
 
+def normal_nussinov2dotbracket(rna_sequence):
+    print("dp")
+    dp = nussinov(rna_sequence)
+    print("traceback")
+    tuple_structure = traceback(
+        dp, rna_sequence, 0, len(rna_sequence)-1, set())
+    print("nussinov")
+    print(tuple_structure)
+
+    # dot bracket
+    dot_bracket = ['.' for _ in range(len(rna_sequence))]
+    for (i, j) in tuple_structure:
+        i, j = min(i, j), max(i, j)
+        dot_bracket[i] = '('
+        dot_bracket[j] = ')'
+    ss = ''.join(dot_bracket)
+    return ss
+
+
 def onehot2seq(X):
     seq = ""
     for i in range(X.size(0)):
@@ -77,8 +96,6 @@ def train_model(n,  y_seq, x_init, lr, num_epochs, noise_scale, dim, T, ReluThre
         for j in range(n):
             A[i, j] = torch.abs(torch.tensor(i - j))
 
-    Bias = torch.zeros(n, n) * 3  # traceback の時にノイズによって非負の値が出るのを防止する
-
     # initialization
     # n times 4 matrix (one hot)
     X = torch.zeros(n, dim)
@@ -99,126 +116,63 @@ def train_model(n,  y_seq, x_init, lr, num_epochs, noise_scale, dim, T, ReluThre
     X0 = X.detach()
     seq0 = onehot2seq(X)
     print("X", pd.DataFrame(X.detach().numpy()))
-    L_prime_list = []
     L_list = []
 
     for epoch in range(num_epochs):
         print(f"-------------------- Epoch: {epoch} ---------------------")
-        # noise generation
-        noise_theta = noise.sample((n, n, 3)) * noise_scale
-        noise_phi = noise.sample((n, n, n)) * noise_scale
 
         # --------------------------- FORWARD ---------------------------
         dp = logsumexp_nussinov(X, T, gaussian_sigma, ReluThreshold)
         theta, phi = dp2thetaphi(dp, n, X, T, ReluThreshold)
 
         # MAP 推定 on traceback
-        ss_tuple, z1, z2 = MAP(theta + noise_theta, phi + noise_phi)
+        ss_tuple, z1, z2 = MAP(theta, phi)
+        ss_simple_nussinov = normal_nussinov2dotbracket(onehot2seq(X))
 
         print(f"seq 1st = {seq0}")
         print(f"seq now = {onehot2seq(X)}")
         print(f"xss : {bptuple2dotbracket(n, ss_tuple)}")
+        print(f"ss_by_discrete_nussinov:", ss_simple_nussinov)
         print(f"yss : {y_seq.ss_string}")
         print(f"y  : {y_seq.seq}")
 
-        L = torch.sum((z1 - y_seq.z1) ** 2) + torch.sum((z2 - y_seq.z2) ** 2)
-        L.requires_grad = False
-        L_prime = torch.sum((z1[:, :, 2] - y_seq.z1[:, :, 2])**2)
-        L_list.append(L.item())
-        L_prime_list.append(L_prime.item())
+        if ss_simple_nussinov == y_seq.ss_string:
+            print("match!! found best x")
 
-        print(f"L: {L}")
-        print(f"L' = {L_prime}")
-        if L_prime == 0:
-            L_prime_old = L_prime
-            if L_prime_old == L_prime:
-                print("L_prime keeps 0 two times, so break.")
-                break
+        L = torch.sum((y_seq.dp - dp) ** 2)
+        L_prime = torch.sum((y_seq.discrete_dp * T - dp) ** 2)
+        L_list.append(L.item())
+        print("Loss L:", L)
+        print("L prime:", L_prime)
 
         # ----- BACKWARD -----
         # Implement backpropagation by hand
 
-        L_z1 = 2 * (z1 - y_seq.z1)
-        L_z1[:, :, 2] *= 10
-        L_z2 = 2 * (z2 - y_seq.z2)
-        # 塩基対だけ勾配を許す
-        L_z2 *= 0
-        L_z1[:, :, 0] = 0
-        L_z1[:, :, 1] = 0
+        L_dp = 2 * (dp - y_seq.dp)
 
-        if torch.allclose(L_z1, torch.zeros(n, n, 3)):
-            print("L_z1 is all zeros.")
-            break
-
-        new_theta = theta - lr * L_z1 / lr
-        new_phi = phi - lr * L_z2 / lr
-
-        # MAP
-        _, new_z1, new_z2 = MAP(new_theta + noise_theta,
-                                new_phi + noise_phi)
-        L_theta, L_phi = z1 - new_z1, z2 - new_z2
-
-        if torch.allclose(L_theta, torch.zeros(n, n, 3)) and torch.allclose(L_phi, torch.zeros(n, n, n)):
-            print("L_theta and L_phi are all zeros.")
-            # エントロピー項の微分値を付け足す.
-            L_prob = torch.zeros(n, dim)
-            for i in range(n):
-                for d in range(dim):
-                    # random vector
-                    L_prob[i][d] = torch.randn(1)
-            count_no_grad += 1
-            X = X + L_prob * 10
-            X = torch.nn.functional.relu(X)
-            X = torch.nn.functional.normalize(X, p=1, dim=1)
-            print("X:", pd.DataFrame(X.detach().numpy()))
-            # continue
-            continue
-
-        L_dp = torch.zeros(n, n)
-        for i in range(n):
-            for j in range(i+1, n):
-                L_dp[i][j] += L_theta[i-1][j+1][2] if i - \
-                    1 >= 0 and j+1 < n else 0
-                L_dp[i][j] += L_theta[i-1][j][0] if i-1 >= 0 else 0
-                L_dp[i][j] += L_theta[i][j+1][1] if j+1 < n else 0
-                for l in range(j+1, n):  # dp[i][j] が分岐の時に左側に出る場合
-                    L_dp[i][j] += L_phi[i][l][j]
-                for l in range(i):  # dp[i][j] が分岐の時に右側に出る場合
-                    L_dp[i][j] += L_phi[l][j][i-1]
+        #  discrete な値を使って微分
+        # L_dp = 2 * (dp - y_seq.discrete_dp * T)
+        # print("L_dp:", L_dp)
         L_X = torch.zeros(n, dim)
-        for i in range(n):
-            for j in range(n):
-                L_X[i] += bp_grad(X[i], X[j]) * \
-                    L_theta[i][j][2] * (j - i >= 3 or j - i <= -3)
-        if DEBUG:
-            print("L_X", pd.DataFrame(L_X.detach().numpy()))
-        # sys.exit()
 
         # L_X
         ddpdX = grad_dp_X(dp, X, ReluThreshold, T, dim, gaussian_sigma)
-        # print("ddpdXの絶対値の分布を見る", pd.DataFrame(
-        #     ddpdX.abs().detach().numpy().reshape(-1)).describe())
-        # sys.exit()
         # ddpdX[n][dim][n][n]
-        for t in range(n):
-            for d in range(dim):
-                for i in range(n):
-                    for j in range(n):
-                        L_X[t][d] += ddpdX[t][d][i][j] * L_dp[i][j]
+        # for t in range(n):
+        #     for d in range(dim):
+        #         for i in range(n):
+        #             for j in range(n):
+        #                 L_X[t][d] += ddpdX[t][d][i][j] * L_dp[i][j]
         # アインシュタインの縮約記法
-        # L_X = torch.einsum("tdij,ij->td", ddpdX, L_dp)
+        L_X = torch.einsum("tdij,ij->td", ddpdX, L_dp)
         if DEBUG:
             # print("L_z1:", pd.DataFrame(L_z1[:, :, 2].detach().numpy()))
             print("theta:", pd.DataFrame(theta[:, :, 2].detach().numpy()))
-            print("new_theta:", pd.DataFrame(
-                new_theta[:, :, 2].detach().numpy()))
             # print("z1 = ", pd.DataFrame(z1[:, :, 2].detach().numpy()))
             # print("new_z1 = ", pd.DataFrame(new_z1[:, :, 2].detach().numpy()))
-            print("z1 == new_z1:", torch.allclose(z1, new_z1))
-            print("L_theta:", pd.DataFrame(L_theta[:, :, 2].detach().numpy()))
             print("L_dp:", pd.DataFrame(L_dp.detach().numpy()))
             print("ddpdX:", ddpdX)
-            print("L_X, X", pd.DataFrame(L_X.detach().numpy()),
+            print("L_X, X", pd.DataFrame(L_X.detach().numpy()), "\n",
                   pd.DataFrame(X.detach().numpy()))
         X_old = X.detach()
         L_X_old = L_X.detach()
@@ -229,7 +183,7 @@ def train_model(n,  y_seq, x_init, lr, num_epochs, noise_scale, dim, T, ReluThre
         X = torch.nn.functional.normalize(X, p=1, dim=1)
         # X = softmax(X.detach().numpy(), axis=1)
         # X = torch.tensor(X, dtype=torch.float32)
-        if epoch % 10 == 0:
+        if epoch % 10 == 1:
             print("X:", pd.DataFrame(X.detach().numpy()))
         # sys.exit()
 
@@ -238,13 +192,8 @@ def train_model(n,  y_seq, x_init, lr, num_epochs, noise_scale, dim, T, ReluThre
         print("L_old dot L_new, norm L_old, norm L_new", torch.dot(L_X_old.view(-1),
               L_X.view(-1)) / (torch.norm(L_X_old) * torch.norm(L_X)), torch.norm(L_X_old), torch.norm(L_X))
 
-        # もし X の各行の最大のものの最小値が 1 に非常に近いならば、収束したとみなし、終了する
-        if np.min(np.max(X.detach().numpy(), axis=1)) > 0.5 and epoch > 1000:
-            print("Converged.")
-            break
-
         # たまに確率的な勾配を足す
-        if epoch % 5 == 0:
+        if epoch % 25 == 0:
             L_prob = torch.zeros(n, dim)
             for i in range(n):
                 for d in range(dim):
@@ -256,17 +205,12 @@ def train_model(n,  y_seq, x_init, lr, num_epochs, noise_scale, dim, T, ReluThre
             print("X has nan.")
             print("X:", pd.DataFrame(X.detach().numpy()))
             print("L_X:", pd.DataFrame(L_X.detach().numpy()))  # これも nan だった...
-            print("L_prob:", pd.DataFrame(
-                L_prob.detach().numpy()))  # これはセーブ。さらに遡る
-            print("L_theta:", pd.DataFrame(
-                L_theta[:, :, 2].detach().numpy()))  # いけてる
-            print("L_phi:", pd.DataFrame(L_phi[:, :, 0].detach().numpy()))
             sys.exit()
         # if X_old != X: tensor なので違う表記
         if onehot2seq(X) != onehot2seq(X_old):
             print("X has changed now at epoch", epoch)
 
-    return X0, seq0, X,  onehot2seq(X), bptuple2dotbracket(n, ss_tuple), count_no_grad, L_prime_list, L_list
+    return X0, seq0, X,  onehot2seq(X), bptuple2dotbracket(n, ss_tuple), count_no_grad,  L_list
 
 
 class Sequence:
@@ -296,29 +240,38 @@ class Sequence:
         self.bptuple, self.z1, self.z2 = traceback_MAP(theta, phi, self.len)
         self.ss_string = bptuple2dotbracket(self.len, self.bptuple)
 
+    def discrete_nussinov(self):
+        discrete_dp = nussinov(self.seq)
+        self.discrete_dp = torch.zeros(self.len, self.len)
+        for i in range(self.len):
+            for j in range(i+1, self.len):
+                self.discrete_dp[i][j] = discrete_dp[i][j]
+
 
 def main():
     # parameters about x
     dim = 4
-    T = 3  # 小さすぎると logsumexp と max の近似の誤差が大きくなるので、 5 くらいが望ましい。大きすぎても nan を吐き出しかねないので注意
+    T = 4.0  # 小さすぎると logsumexp と max の近似の誤差が大きくなるので、 5 くらいが望ましい。大きすぎても nan を吐き出しかねないので注意
     noise_scale = 1e-2
     num_epochs = 350
     Relu_Threshold = 0.4  # should be larger than 0.25, smaller than 1.0
-    lr = 1e-5
-    gaussian_sigma = 0.7  # 不要なので None にしておく。今後使うかもなので一応残しておくけど。
-    y = "GGGAAAAACCC"
+    lr = 1e-2
+    gaussian_sigma = 0.2  # 不要なので None にしておく。今後使うかもなので一応残しておくけど。
+    # y = "GAGCCAACAC"
+    y = "GGGAACCCGGGAACCC"  # tRNA
     m = len(y)
     n = m
-    x_init = "GAGAAAAACCC"
+    x_init = "A" * n
 
     y_seq = Sequence(y)
     y_seq.nussinov_thetaphi(
-        4, gaussian_sigma, Relu_Threshold)
+        T, gaussian_sigma, Relu_Threshold)
+    y_seq.discrete_nussinov()
     # print("y_seq.dp", y_seq.dp)
     # print("y_seq.ss_string:", y_seq.ss_string)
 
-    X0, seq0, X, seq, x_ss, count_no_grad, L_prime_list, L_list = train_model(n,  y_seq, x_init, lr, num_epochs,
-                                                                              noise_scale, dim, T, Relu_Threshold, gaussian_sigma)
+    X0, seq0, X, seq, x_ss, count_no_grad, L_list = train_model(n,  y_seq, x_init, lr, num_epochs,
+                                                                noise_scale, dim, T, Relu_Threshold, gaussian_sigma)
     print(f"count_no_grad: {count_no_grad}")
     print(f"X0:\n", pd.DataFrame(X0.detach().numpy()))
     print("X: \n", pd.DataFrame(X.detach().numpy()))
@@ -332,14 +285,12 @@ def main():
     # epoch vs L, L'
     import matplotlib.pyplot as plt
     # x軸は epoch
-    plt.plot(range(len(L_list)), L_list, label="L")
-    plt.plot(range(len(L_prime_list)), L_prime_list, label="L'")
+    plt.plot(range(len(L_list) - 3), L_list[3:], label="L")
     plt.xlabel("epoch")
     plt.ylabel("L, L'")
-    plt.yticks(np.arange(0, max(L_list) + 1, 1))
     plt.title(f"L and L' vs epoch \n x0 = {x_init}, y = {y}")
     plt.legend()
-    plt.savefig("/Users/ootagakitakumi/Library/Mobile Documents/com~apple~CloudDocs/大学院/浅井研究室/InverseFolding/SSOT/figures/L_Lprime2.png")
+    plt.savefig("/Users/ootagakitakumi/Library/Mobile Documents/com~apple~CloudDocs/大学院/浅井研究室/研究/InverseFolding/SSOT/figures/L_dploss.png")
 
 
 if __name__ == "__main__":

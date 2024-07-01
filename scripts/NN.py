@@ -2,8 +2,9 @@ import math
 from modules.markov.kmer_mm import KmerMarkovModel
 from modules.nussinov.nussinov import nussinov, traceback
 # from modules.nussinov.stochastic_nussinov import StochasticNussinov
-from modules.nussinov.onehot_differential_nussinov import logsumexp_nussinov, differential_traceback, simple_traceback, onehot_basepair, traceback_MAP, onehot_basepair_grad, onehot_Relu_basepair, onehot_Relu_basepair_grad, grad_dp_X
-# from modules.ss.internal_distance import DijkstraSS
+from modules.nussinov.onehot_differential_nussinov import logsumexp_nussinov, traceback_MAP,  onehot_Relu_basepair, onehot_Relu_basepair_grad, grad_dp_X
+from modules.nussinov.onehot_differential_nussinov import onehot_basepair, onehot_basepair_grad
+
 from modules.ss.internal_distance import DijkstraSS, floyd_warshall, dijkstra_route
 from modules.ss.util import bptuple2dotbracket
 import numpy as np
@@ -21,81 +22,81 @@ from modules.noise import SumOfGammaNoiseDistribution
 DEBUG = True
 
 
-def check_convergence(f, g, epsilon, C, p, q, threshold=1e-7):
-    n, m = len(p), len(q)
-    P = torch.exp((-C + g.reshape(1, m) + f.reshape(n, 1)) / epsilon)
-    return torch.allclose(P.sum(0), q, atol=threshold) and torch.allclose(P.sum(1), p, atol=threshold)
+# def check_convergence(f, g, epsilon, C, p, q, threshold=1e-7):
+#     n, m = len(p), len(q)
+#     P = torch.exp((-C + g.reshape(1, m) + f.reshape(n, 1)) / epsilon)
+#     return torch.allclose(P.sum(0), q, atol=threshold) and torch.allclose(P.sum(1), p, atol=threshold)
 
 
-def log_sinkhorn(p, q, C, epsilon, iter):
-    epsilon = torch.tensor(epsilon, dtype=torch.float32, requires_grad=False)
-    n, m = len(p), len(q)
-    p = torch.tensor(ot.unif(n), dtype=torch.float32, requires_grad=False)
-    q = torch.tensor(ot.unif(m), dtype=torch.float32, requires_grad=False)
-    f = torch.zeros(n)
-    g = torch.zeros(m)
+# def log_sinkhorn(p, q, C, epsilon, iter):
+#     epsilon = torch.tensor(epsilon, dtype=torch.float32, requires_grad=False)
+#     n, m = len(p), len(q)
+#     p = torch.tensor(ot.unif(n), dtype=torch.float32, requires_grad=False)
+#     q = torch.tensor(ot.unif(m), dtype=torch.float32, requires_grad=False)
+#     f = torch.zeros(n)
+#     g = torch.zeros(m)
 
-    congergence = False
-    for t in range(iter):
-        f = -epsilon * \
-            torch.logsumexp((-C + g.reshape(1, m)) / epsilon,
-                            dim=1) + epsilon * torch.log(p)
+#     congergence = False
+#     for t in range(iter):
+#         f = -epsilon * \
+#             torch.logsumexp((-C + g.reshape(1, m)) / epsilon,
+#                             dim=1) + epsilon * torch.log(p)
 
-        # for debugging: all shape
-        # print(f"f.shape: {f.shape}, C.shape: {C.shape}, torch.logsumexp((-C + f.reshape(n, 1)) / epsilon,dim=0).shape: {torch.logsumexp((-C + f.reshape(n, 1)).T / epsilon,dim=0).shape}, epsilon * torch.log(q).shape: {(epsilon * torch.log(q)).shape}")
+#         # for debugging: all shape
+#         # print(f"f.shape: {f.shape}, C.shape: {C.shape}, torch.logsumexp((-C + f.reshape(n, 1)) / epsilon,dim=0).shape: {torch.logsumexp((-C + f.reshape(n, 1)).T / epsilon,dim=0).shape}, epsilon * torch.log(q).shape: {(epsilon * torch.log(q)).shape}")
 
-        g = -epsilon * \
-            torch.logsumexp((-C + f.reshape(n, 1)) / epsilon,
-                            dim=0) + epsilon * torch.log(q)
+#         g = -epsilon * \
+#             torch.logsumexp((-C + f.reshape(n, 1)) / epsilon,
+#                             dim=0) + epsilon * torch.log(q)
 
-        if check_convergence(f, g, epsilon, C, p, q):
-            congergence = True
-            break
+#         if check_convergence(f, g, epsilon, C, p, q):
+#             congergence = True
+#             break
 
-    P = torch.exp((-C + g.reshape(1, m) + f.reshape(n, 1)) / epsilon)
-    if not congergence:
-        print("Not converged")
-    return P
-
-
-def compute_gromov_wasserstein_term(a, b, Cx, Cy, P):
-    """
-    Compute the Gromov-Wasserstein discrepancy term.
-
-    Args:
-    - ax, bx (numpy.ndarray): Weights for the source space X
-    - dX (numpy.ndarray): Distance matrix in the source space X
-    - ay, by (numpy.ndarray): Weights for the target space Y
-    - dY (numpy.ndarray): Distance matrix in the target space Y
-    - P (numpy.ndarray): Optimal transport plan between X and Y
-
-    Returns:
-    - float: Computed discrepancy term
-    """
-    # Calculate the weighted sum of squared distances for X
-    weighted_dX_squared = torch.sum(a[:, None] * a[None, :] * (Cx ** 2))
-
-    # Calculate the weighted sum of squared distances for Y
-    # weighted_dY_squared = torch.sum(b[:, None] * b[None, :] * (Cy ** 2))
-    weighted_dY_squared = torch.zeros(1)
-
-    cross_term = torch.einsum('ij,ik,jl,kl->', P, Cx, Cy, P)
-
-    # Combine terms
-    result = weighted_dX_squared + weighted_dY_squared - 2 * cross_term
-    return result
+#     P = torch.exp((-C + g.reshape(1, m) + f.reshape(n, 1)) / epsilon)
+#     if not congergence:
+#         print("Not converged")
+#     return P
 
 
-def compute_gw_transport(Cx, Cy, p, q, epsilon, lambda_, max_iter, sinkhorn_iter):
-    # initialize randomly
-    n, m = len(p), len(q)
-    P_t = torch.ones(n, m) / (n * m)
+# def compute_gromov_wasserstein_term(a, b, Cx, Cy, P):
+#     """
+#     Compute the Gromov-Wasserstein discrepancy term.
 
-    for t in range(max_iter):
-        # C_t = -4 * np.dot(np.dot(Cx, P_t), Cy) # tensor に対応するように書き換える
-        C_t = -4 * torch.mm(torch.mm(Cx, P_t), Cy) + (epsilon - lambda_) * P_t
-        P_t = log_sinkhorn(p, q, C_t, epsilon=lambda_, iter=sinkhorn_iter)
-    return P_t
+#     Args:
+#     - ax, bx (numpy.ndarray): Weights for the source space X
+#     - dX (numpy.ndarray): Distance matrix in the source space X
+#     - ay, by (numpy.ndarray): Weights for the target space Y
+#     - dY (numpy.ndarray): Distance matrix in the target space Y
+#     - P (numpy.ndarray): Optimal transport plan between X and Y
+
+#     Returns:
+#     - float: Computed discrepancy term
+#     """
+#     # Calculate the weighted sum of squared distances for X
+#     weighted_dX_squared = torch.sum(a[:, None] * a[None, :] * (Cx ** 2))
+
+#     # Calculate the weighted sum of squared distances for Y
+#     # weighted_dY_squared = torch.sum(b[:, None] * b[None, :] * (Cy ** 2))
+#     weighted_dY_squared = torch.zeros(1)
+
+#     cross_term = torch.einsum('ij,ik,jl,kl->', P, Cx, Cy, P)
+
+#     # Combine terms
+#     result = weighted_dX_squared + weighted_dY_squared - 2 * cross_term
+#     return result
+
+
+# def compute_gw_transport(Cx, Cy, p, q, epsilon, lambda_, max_iter, sinkhorn_iter):
+#     # initialize randomly
+#     n, m = len(p), len(q)
+#     P_t = torch.ones(n, m) / (n * m)
+
+#     for t in range(max_iter):
+#         # C_t = -4 * np.dot(np.dot(Cx, P_t), Cy) # tensor に対応するように書き換える
+#         C_t = -4 * torch.mm(torch.mm(Cx, P_t), Cy) + (epsilon - lambda_) * P_t
+#         P_t = log_sinkhorn(p, q, C_t, epsilon=lambda_, iter=sinkhorn_iter)
+#     return P_t
 
 
 def calculateDistmat(rna_ss_matrix, alpha, A):  # excluding pseudoknot!
@@ -211,16 +212,17 @@ def train_model(n, m, alpha, Cy, y, ss_y, lr, num_epochs, noise_scale, dim, T, R
         # GW distance
         p = torch.tensor(ot.unif(n))
         q = torch.tensor(ot.unif(m))
-        P = compute_gw_transport(Cx, Cy, p, q, epsilon=1e-1, lambda_=10 * dijkstra_scaler,
-                                 max_iter=1000, sinkhorn_iter=1000)
-        GW = compute_gromov_wasserstein_term(p, q, Cx, Cy, P)
+        gw = ot.gromov.entropic_gromov_wasserstein2(
+            Cx, Cy, p, q, 'square_loss', epsilon=0.1, log=True, verbose=False)
 
-        print(f"---------- GW distance: {GW} ----------")
+        print(f"---------- GW distance: {gw} ----------")
 
         # ----- BACKWARD -----
         # Implement backpropagation by hand
 
-        GW.backward()
+        gw.backward()
+        print("Cx.grad:", Cx.grad)
+        sys.exit()
 
         # delta Cx
         L_Cx = Cx.grad.detach().numpy()
