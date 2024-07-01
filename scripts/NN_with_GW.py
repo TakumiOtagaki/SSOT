@@ -201,21 +201,33 @@ def train_model(n, m, alpha, Cy, y, ss_y, lr, num_epochs, noise_scale, dim, T, R
         print(f"y  : {y}")
 
         # convert rna_ss_matrix to ss matrix
+        print("rna_ss_matrix:", pd.DataFrame(rna_ss_matrix.detach().numpy()))
         W = calculateDistmat(rna_ss_matrix, alpha, A)
-        W = W * dijkstra_scaler
+        print("W:", pd.DataFrame(W.detach().numpy()))
+        W = W
 
         Cx = floyd_warshall(W + noise_W)
 
         # Cx を tensor にして、Loss (= GW) の勾配を計算できるようにする
         Cx = torch.tensor(Cx, requires_grad=True, dtype=torch.float32)
 
+        Cy = Cy / Cy.max()
+        Cx = Cx / Cx.max()
+
+        print("Cx:", pd.DataFrame(Cx.detach().numpy()))
+        print("Cy:", pd.DataFrame(Cy.detach().numpy()))
+
         # GW distance
-        p = torch.tensor(ot.unif(n))
-        q = torch.tensor(ot.unif(m))
-        gw = ot.gromov.entropic_gromov_wasserstein2(
-            Cx, Cy, p, q, 'square_loss', epsilon=0.1, log=True, verbose=False)
+        p = torch.tensor(ot.unif(n), dtype=torch.float32)
+        q = torch.tensor(ot.unif(m), dtype=torch.float32)
+        result = ot.gromov.entropic_gromov_wasserstein2(
+            Cx, Cy, p, q, 'square_loss', log=True, verbose=True, epsilon= n * 5e-2, max_iter=1e14, symmetric=True)
+        print("result = ", result)
+        gw = result[-1]["gw_dist"]
+
 
         print(f"---------- GW distance: {gw} ----------")
+        # sys.exit()
 
         # ----- BACKWARD -----
         # Implement backpropagation by hand
@@ -236,6 +248,7 @@ def train_model(n, m, alpha, Cy, y, ss_y, lr, num_epochs, noise_scale, dim, T, R
             for j in range(i+1, n):
                 # if DEBUG:
                 #     print(f"i = {i}, j = {j}")
+                # O(n log n) * O(n^2) = O(n^3 log n)
                 R_newij = dijkstra_route(W_new + noise_W, i, j)
                 R_oldij = dijkstra_route(W + noise_W, i, j)
                 L_W += 2 * (R_oldij - R_newij)
@@ -348,7 +361,7 @@ def main():
     n = m + 4
     dim = 4
     T = 100.0
-    noise_scale = 1e-5
+    noise_scale = 1e-6
     num_epochs = 100
     dijkstra_scaler = 10.0
     Relu_Threshold = 0.7  # should be larger than 0.5, smaller than 1.0
